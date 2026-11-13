@@ -135,6 +135,80 @@ If you prefer to keep prompts inline in `gitpt.json` rather than in separate fil
 
 Using `summarySystemPromptPath` / `summaryUserPromptPath` is usually more convenient because you can edit a normal multi-line file without escaping.
 
+## `gitpt serve` — OpenAI‑compatible HTTP server
+
+GitPT can run as a local HTTP server that speaks the OpenAI Chat Completions API. This lets any AI‑powered Git client that supports a **custom OpenAI‑compatible endpoint** — notably [SmartGit](https://docs.smartgit.dev/latest/manual/integrations/ai/built-in-ai) — use GitPT to generate commit messages, without the client needing to know anything about GitPT or its LLM configuration.
+
+```bash
+gitpt serve
+# → GitPT serve listening on http://127.0.0.1:9999
+# → Default model: foundation
+# → Concurrency: 2
+# → skipFinalSummarization: false
+```
+
+Point your client at `http://127.0.0.1:4242/v1` with any model name (the server echoes it back; the default is `foundation`, which matches SmartGit's built‑in expectations for macOS).
+
+### What the server does
+
+`POST /v1/chat/completions` accepts two kinds of requests and routes them automatically:
+
+| Request contains | Behaviour |
+|------------------|-----------|
+| A Git diff (detected by a line starting with `diff --git` or `diff --cc`, or SmartGit's `Git Diff:` marker) | Runs GitPT's full commit‑message pipeline: `prepareCommitContext` → optional per‑file summarization → `generateCommitMessage`. Honours `skipFinalSummarization` from your GitPT config exactly as `gitpt commit` does. |
+| A plain user message and **no** diff | Forwards the last `role: "user"` message to the configured LLM with a minimal system prompt. Used by SmartGit's connection test and any other plain‑chat probe. |
+
+Responses are OpenAI‑compatible and support `"stream": true` via Server‑Sent Events (`data: {…}\n\n` chunks terminated by `data: [DONE]`). Non‑streaming requests receive a standard `chat.completion` JSON body.
+
+Because the diff comes from the request payload, **one server instance serves every repository**. No per‑repository configuration is required.
+
+### Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/v1/chat/completions` | Commit‑message generation or generic chat |
+| `GET`  | `/v1/models` | Static model list (used by SmartGit's AI setup) |
+| `GET`  | `/health` | Liveness probe, returns `{ "status": "ok" }` |
+
+### Options
+
+```
+-p, --port <port>   Port to listen on (default: 9999)
+--host <host>       Interface to bind (default: 127.0.0.1)
+-m, --model <model> Default model name advertised to clients (default: foundation)
+```
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `GITPT_SERVE_PORT` | `4242` | Port (overridden by `--port`) |
+| `GITPT_SERVE_HOST` | `127.0.0.1` | Bind interface (overridden by `--host`) |
+| `GITPT_SERVE_MODEL` | `foundation` | Default model name (overridden by `--model`) |
+| `GITPT_SERVE_CONCURRENCY` | `2` | Max concurrent LLM generations |
+| `GITPT_SERVE_TIMEOUT_MS` | `60000` | Per‑request timeout in milliseconds |
+
+### SmartGit setup
+
+1. Run `gitpt setup` once so a provider and API key are configured.
+2. Start the server: `gitpt serve`.
+3. In SmartGit → *Preferences → AI → Custom (OpenAI compatible)*:
+   - **Base URL:** `http://127.0.0.1:4242/v1`
+   - **Model:** `foundation`
+
+### Security notes
+
+- The server binds to **`127.0.0.1` by default**, so it is not reachable from other machines. Only use `--host 0.0.0.0` if you understand that any host on your network could trigger LLM calls billed to your API key.
+- The server **does not check the `Authorization` header** — it relies on loopback binding for access control. If you expose it beyond `localhost`, put it behind a reverse proxy that enforces authentication.
+- All LLM calls go through the provider configured with `gitpt setup`; no credentials are read from request headers or bodies.
+
+### Implementation notes
+
+- The HTTP layer lives in `src/commands/serve/server.ts`, registered as `gitpt serve` in the CLI entry point.
+- Commit‑message generation reuses `prepareCommitContext` and `generateCommitMessage` from the commit command, so changes to the core prompt or summarization logic automatically apply to the server.
+- Concurrent requests are queued behind a small semaphore (`GITPT_SERVE_CONCURRENCY`) to avoid saturating the provider.
+- `SIGINT` / `SIGTERM` trigger a graceful shutdown with a 5‑second grace period for in‑flight requests.
+
 ## Use
 
 With plain git, you write the message yourself:
