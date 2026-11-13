@@ -16,6 +16,7 @@ import { modelCommand } from "./commands/model.js";
 import { prCreateCommand } from "./commands/pr/index.js";
 import { resetCommand } from "./commands/reset.js";
 import { setupCommand } from "./commands/setup.js";
+import { serveCommand } from "./commands/serve/index.js";
 
 const program = new Command();
 
@@ -112,6 +113,14 @@ hook
   .command("run <msgFile> [source] [sha]")
   .description("(internal) called by the installed hook")
   .action(hookRunCommand);
+
+program
+  .command("serve")
+  .description("Run the OpenAI-compatible HTTP server (for SmartGit & other AI clients)")
+  .option("-p, --port <port>", "Port to listen on", "4242")
+  .option("--host <host>", "Interface to bind (default: 127.0.0.1)", "127.0.0.1")
+  .option("-m, --model <model>", "Default model name advertised to clients", "foundation")
+  .action(serveCommand);
 
 // Handle unknown commands by passing them to git
 program.on("command:*", () => {
