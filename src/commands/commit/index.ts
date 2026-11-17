@@ -335,6 +335,6 @@ export const formatAsChangeList = (entries: string[]): string => {
   const lines = entries.map(l => l.trim()).filter(l => l.length > 0);
   if (lines.length === 0) return "";
   return lines
-    .map((line, i) => (i < lines.length - 1 ? `${line};` : line))
+    .map((line, i) => (i < lines.length - 1 ? `${line}` : line))
     .join("\n");
 };
